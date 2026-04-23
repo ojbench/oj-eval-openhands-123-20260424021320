@@ -155,6 +155,7 @@ public:
       // Degraded mode
       if (failed_disk_ == disk_id) {
         // Writing to failed disk: update parity instead
+        // The parity should be: data XOR (all other data blocks)
         std::vector<char> temp(block_size_, 0);
         std::vector<char> new_parity(block_size_);
         std::memcpy(new_parity.data(), data, block_size_);
@@ -173,28 +174,20 @@ public:
         // Parity disk failed: just write the data
         WritePhysicalBlock(disk_id, stripe_id, data);
       } else {
-        // Another disk failed: read old data, update data and reconstruct parity
+        // Another disk failed: use old_parity XOR old_data XOR new_data
         std::vector<char> old_data(block_size_);
-        std::vector<char> new_parity(block_size_, 0);
+        std::vector<char> old_parity(block_size_);
+        std::vector<char> new_parity(block_size_);
         
         ReadPhysicalBlock(disk_id, stripe_id, old_data.data());
-        WritePhysicalBlock(disk_id, stripe_id, data);
+        ReadPhysicalBlock(parity_disk, stripe_id, old_parity.data());
         
-        // Reconstruct parity from all available data blocks
-        for (int disk = 0; disk < num_disks_; disk++) {
-          if (disk != failed_disk_ && disk != parity_disk) {
-            std::vector<char> temp(block_size_);
-            if (disk == disk_id) {
-              std::memcpy(temp.data(), data, block_size_);
-            } else {
-              ReadPhysicalBlock(disk, stripe_id, temp.data());
-            }
-            for (int i = 0; i < block_size_; i++) {
-              new_parity[i] ^= temp[i];
-            }
-          }
+        // new_parity = old_parity XOR old_data XOR new_data
+        for (int i = 0; i < block_size_; i++) {
+          new_parity[i] = old_parity[i] ^ old_data[i] ^ data[i];
         }
         
+        WritePhysicalBlock(disk_id, stripe_id, data);
         WritePhysicalBlock(parity_disk, stripe_id, new_parity.data());
       }
     }
